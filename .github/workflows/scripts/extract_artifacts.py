@@ -3,21 +3,23 @@ import os
 import zipfile
 import glob
 import argparse
+import shutil
 
 
-def should_extract(filename: str) -> bool:
+def is_release_file(filename: str) -> bool:
+    """判断是否为发布文件"""
     if not filename.startswith('android'):
         return False
-    # android...-boot-gz.img, android...-boot-lz4.img
-    # android...-AnyKernel3.zip
-    if filename.endswith('.img') and '-boot.' in filename and not 'AnyKernel' in filename:
-        return True
+    # android...-boot-gz.img, android...-boot-lz4.img, android...-AnyKernel3.zip
     if filename.endswith('.zip') and 'AnyKernel3' in filename:
+        return True
+    if filename.endswith('.img') and '-boot.' in filename:
         return True
     return False
 
 
 def process_artifacts(artifacts_dir: str, output_dir: str, build_results_dir: str = None):
+    """从 artifact zip 中提取发布文件"""
     os.makedirs(output_dir, exist_ok=True)
     
     for zip_name in os.listdir(artifacts_dir):
@@ -25,28 +27,35 @@ def process_artifacts(artifacts_dir: str, output_dir: str, build_results_dir: st
             continue
         
         zip_path = os.path.join(artifacts_dir, zip_name)
-        print(f"处理: {zip_name}")
         
-        try:
-            with zipfile.ZipFile(zip_path, 'r') as zf:
-                for member in zf.namelist():
-                    if member.endswith('/') or member.startswith('__MACOSX/'):
-                        continue
-                    
-                    filename = os.path.basename(member)
-                    
-                    if should_extract(filename):
-                        target = os.path.join(output_dir, filename)
-                        with zf.open(member) as src, open(target, 'wb') as dst:
-                            dst.write(src.read())
-                        print(f"  提取: {filename}")
-                    else:
-                        print(f"  跳过: {filename}")
-                            
-        except zipfile.BadZipFile:
-            print(f"错误: 无效的 zip 文件 - {zip_name}")
-        except Exception as e:
-            print(f"错误: {e}")
+        # 检查 artifact zip 本身是否是发布文件
+        if is_release_file(zip_name):
+            # 直接复制整个 zip
+            target = os.path.join(output_dir, zip_name)
+            shutil.copy2(zip_path, target)
+            print(f"复制: {zip_name}")
+        else:
+            # 解压并提取匹配的文件
+            print(f"解压: {zip_name}")
+            try:
+                with zipfile.ZipFile(zip_path, 'r') as zf:
+                    for member in zf.namelist():
+                        if member.endswith('/') or member.startswith('__MACOSX/'):
+                            continue
+                        
+                        filename = os.path.basename(member)
+                        
+                        if is_release_file(filename):
+                            target = os.path.join(output_dir, filename)
+                            with zf.open(member) as src, open(target, 'wb') as dst:
+                                dst.write(src.read())
+                            print(f"  提取: {filename}")
+                        else:
+                            print(f"  跳过: {filename}")
+            except zipfile.BadZipFile:
+                print(f"错误: 无效的 zip 文件 - {zip_name}")
+            except Exception as e:
+                print(f"错误: {e}")
     
     # 合并 SHA256SUMS
     if build_results_dir:
